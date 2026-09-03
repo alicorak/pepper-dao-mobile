@@ -9,6 +9,7 @@ import {
     ThresholdIndicators,
     VoteModal,
     VotingBreakdown,
+    VotingTrackBadge,
 } from '@/components/governance';
 import { ThemedView } from '@/components/themed-view';
 import { FOREST_GREEN } from '@/constants/theme';
@@ -619,7 +620,13 @@ export default function GovernanceProposalDetailScreen() {
             <Text className="font-['PPNeueBit-Bold'] text-lg text-[#FFEA00]">
               {proposal.key}
             </Text>
-            <ProposalStatusPill status={proposal.status} />
+            <View className="flex-row items-center gap-2">
+              <VotingTrackBadge
+                startDate={proposal.startDate}
+                endDate={proposal.endDate}
+              />
+              <ProposalStatusPill status={proposal.status} />
+            </View>
           </View>
         ) : (
           <Text className="ml-4 font-['PPNeueBit-Bold'] text-lg uppercase tracking-wider text-white">

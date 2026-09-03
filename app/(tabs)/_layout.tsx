@@ -23,6 +23,7 @@ export default function TabLayout() {
       <Tabs.Screen name="index" options={{ title: 'Pulse' }} />
       <Tabs.Screen name="governance" options={{ title: 'Decide' }} />
       <Tabs.Screen name="power" options={{ title: 'Power' }} />
+      <Tabs.Screen name="community" options={{ title: 'Community' }} />
     </Tabs>
   );
 }

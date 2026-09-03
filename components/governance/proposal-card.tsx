@@ -11,6 +11,7 @@ import {
 import type { GovernanceProposal } from '@/types/governance';
 
 import { ProposalStatusPill } from './proposal-status-pill';
+import { VotingTrackBadge } from './voting-track-badge';
 
 interface ProposalCardProps {
   proposal: GovernanceProposal;
@@ -176,6 +177,10 @@ export function ProposalCard(props: ProposalCardProps) {
       <View className="mb-2 flex-row items-center justify-between">
         <View className="flex-row items-center gap-2">
           <ProposalStatusPill status={proposal.status} />
+          <VotingTrackBadge
+            startDate={proposal.startDate}
+            endDate={proposal.endDate}
+          />
           {proposal.type === 'ADMIN' ? (
             <Text className="text-[10px] text-white/80">Admin</Text>
           ) : proposal.type === 'PEP' ? (

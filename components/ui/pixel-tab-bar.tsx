@@ -11,6 +11,7 @@ const TAB_CONFIG: Record<string, { icon: keyof typeof MaterialIcons.glyphMap; la
   index: { icon: 'favorite', label: 'PULSE', activeColor: '#E54545' },
   governance: { icon: 'how-to-vote', label: 'DECIDE', activeColor: '#3B82F6' },
   power: { icon: 'bolt', label: 'POWER', activeColor: '#FBBF24' },
+  community: { icon: 'menu-book', label: 'COMMUNITY', activeColor: '#FFC043' },
 };
 
 interface PixelTabButtonProps {
