@@ -37,11 +37,12 @@ function PixelTabButton({
   onPress,
   onLongPress,
 }: PixelTabButtonProps) {
-  async function handlePress() {
-    if (Platform.OS === 'ios') {
-      await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-    }
+  function handlePress() {
+    // Navigate first; haptics are fire-and-forget so they never delay the tab switch
     onPress();
+    if (Platform.OS === 'ios') {
+      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {});
+    }
   }
 
   const color = isFocused ? activeColor : INACTIVE_COLOR;
