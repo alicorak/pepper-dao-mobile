@@ -1,7 +1,10 @@
 import { useAccount } from '@reown/appkit-react-native';
 import { ActivityIndicator, View } from 'react-native';
 
+import { pickDesign } from '@/config/design';
 import { useOnboardingContext } from '@/contexts/onboarding-context';
+import { OnboardingScreen } from '@/designs/thermal/screens/onboarding-screen';
+import { WalletLinkScreen } from '@/designs/thermal/screens/wallet-link-screen';
 
 import { OnboardingWizard } from './onboarding-wizard';
 import { WalletConnectionModal, useWalletConnectionModal } from './wallet-connection-modal';
@@ -9,6 +12,10 @@ import { WalletConnectionModal, useWalletConnectionModal } from './wallet-connec
 interface OnboardingGateProps {
   children: React.ReactNode;
 }
+
+// Thermal has its own first-run flow; legacy and HQ keep the retro wizard + modal
+const Onboarding = pickDesign({ legacy: OnboardingWizard, thermal: OnboardingScreen, hq: OnboardingWizard });
+const WalletPrompt = pickDesign({ legacy: WalletConnectionModal, thermal: WalletLinkScreen, hq: WalletConnectionModal });
 
 /**
  * Onboarding Gate Component
@@ -33,7 +40,7 @@ export function OnboardingGate({ children }: OnboardingGateProps) {
   // Show onboarding wizard if not completed
   if (shouldShowOnboarding) {
     return (
-      <OnboardingWizard
+      <Onboarding
         onComplete={() => completeOnboarding('explore')}
         onSkip={() => completeOnboarding('explore')}
       />
@@ -44,8 +51,7 @@ export function OnboardingGate({ children }: OnboardingGateProps) {
   return (
     <>
       {children}
-      <WalletConnectionModal visible={visible} onDismiss={handleDismiss} />
+      <WalletPrompt visible={visible} onDismiss={handleDismiss} />
     </>
   );
 }
-

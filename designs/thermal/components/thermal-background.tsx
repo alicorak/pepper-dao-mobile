@@ -126,7 +126,7 @@ interface SensorGridProps {
   height: number;
 }
 
-function SensorGrid({ width, height }: SensorGridProps) {
+export function SensorGrid({ width, height }: SensorGridProps) {
   return (
     <Svg width={width} height={height} style={StyleSheet.absoluteFill}>
       <Defs>
