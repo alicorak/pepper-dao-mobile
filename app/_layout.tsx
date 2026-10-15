@@ -3,7 +3,7 @@ import 'react-native-get-random-values';
 import 'react-native-reanimated';
 import '../global.css';
 
-import { useEffect, useRef, useState } from 'react';
+import { type ReactNode, useEffect, useRef, useState } from 'react';
 import { Linking, Platform, View } from 'react-native';
 
 import { StatusBar } from 'expo-status-bar';
@@ -17,6 +17,10 @@ import { QueryClientProvider } from '@tanstack/react-query';
 import type { EventSubscription } from 'expo-notifications';
 
 import { OnboardingGate } from '@/components/onboarding';
+import { IS_THERMAL, pickDesign } from '@/config/design';
+import { HQ_COLORS } from '@/designs/hq/theme';
+import { RankUpProvider } from '@/designs/thermal/components/rank-up-overlay';
+import { THERMAL_COLORS } from '@/designs/thermal/theme';
 import { WalletProfileLinker } from '@/components/wallet';
 import { OnboardingProvider } from '@/contexts/onboarding-context';
 import { UserProvider } from '@/contexts/user-context';
@@ -193,23 +197,37 @@ export default function RootLayout() {
               <WalletProvider>
                 <WalletProfileLinker>
                   <OnboardingGate>
-                    <Stack>
-                      <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
-                      <Stack.Screen name="modal" options={{ presentation: 'modal', title: 'Modal' }} />
-                      <Stack.Screen
-                        name="governance/[proposalId]"
-                        options={{ headerShown: false }}
-                      />
-                      <Stack.Screen
-                        name="governance/create"
-                        options={{
-                          presentation: 'modal',
-                          headerShown: false,
-                        }}
-                      />
-                    </Stack>
+                    <DesignProvider>
+                      <Stack
+                        screenOptions={
+                          SCREEN_BACKGROUND ? { contentStyle: { backgroundColor: SCREEN_BACKGROUND } } : undefined
+                        }
+                      >
+                        <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
+                        <Stack.Screen name="modal" options={{ presentation: 'modal', title: 'Modal' }} />
+                        <Stack.Screen
+                          name="governance/[proposalId]"
+                          options={{ headerShown: false }}
+                        />
+                        <Stack.Screen
+                          name="governance/create"
+                          options={{
+                            presentation: 'modal',
+                            headerShown: false,
+                          }}
+                        />
+                        <Stack.Screen
+                          name="rulebook"
+                          options={{ headerShown: false, animation: 'slide_from_right' }}
+                        />
+                        <Stack.Screen
+                          name="floor/[floor]"
+                          options={{ headerShown: false, animation: 'slide_from_bottom' }}
+                        />
+                      </Stack>
+                    </DesignProvider>
                   </OnboardingGate>
-                  <StatusBar style="dark" />
+                  <StatusBar style={SCREEN_BACKGROUND ? 'light' : 'dark'} />
 
                   {/* AppKit Modal - Android requires absolute positioning with Expo Router */}
                   {Platform.OS === 'android' ? (
@@ -227,4 +245,17 @@ export default function RootLayout() {
       </AppKitProvider>
     </SafeAreaProvider>
   );
+}
+
+/** Dark designs paint every stack screen; legacy keeps the default */
+const SCREEN_BACKGROUND = pickDesign<string | null>({
+  legacy: null,
+  thermal: THERMAL_COLORS.void,
+  hq: HQ_COLORS.bg,
+});
+
+/** Design-specific global providers (the thermal design celebrates rank-ups app-wide) */
+function DesignProvider({ children }: { children: ReactNode }) {
+  if (!IS_THERMAL) return <>{children}</>;
+  return <RankUpProvider>{children}</RankUpProvider>;
 }

@@ -17,6 +17,8 @@ interface UseActivitiesOptions {
 
 interface UseActivitiesReturn {
   activities: Array<ActivityDisplay>;
+  /** Raw activity rows, for UIs that format events themselves */
+  records: Array<Activity>;
   isLoading: boolean;
   error: Error | null;
   refetch: () => void;
@@ -113,10 +115,12 @@ export function useActivities({ profileId, limit = 20 }: UseActivitiesOptions): 
     staleTime: 30000, // 30 seconds
   });
 
-  const activities = (data || []).map(toActivityDisplay);
+  const records = data || [];
+  const activities = records.map(toActivityDisplay);
 
   return {
     activities,
+    records,
     isLoading,
     error: error as Error | null,
     refetch,

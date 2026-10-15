@@ -1,11 +1,6 @@
-import { PepperDashboard } from '@/components/home/pepper-dashboard';
-import { ThemedView } from '@/components/themed-view';
-import { FOREST_GREEN } from '@/constants/theme';
+import { pickDesign } from '@/config/design';
+import { LegacyHomeScreen } from '@/designs/legacy/screens/home-screen';
+import { HqHomeScreen } from '@/designs/hq/screens/hq-home-screen';
+import { PulseScreen } from '@/designs/thermal/screens/pulse-screen';
 
-export default function HomeScreen() {
-  return (
-    <ThemedView className="flex-1 p-4" style={{ backgroundColor: FOREST_GREEN }}>
-      <PepperDashboard />
-    </ThemedView>
-  );
-}
+export default pickDesign({ legacy: LegacyHomeScreen, thermal: PulseScreen, hq: HqHomeScreen });
