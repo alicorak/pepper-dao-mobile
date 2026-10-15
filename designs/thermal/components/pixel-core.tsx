@@ -5,6 +5,7 @@ import Animated, {
   type SharedValue,
   useAnimatedProps,
   useAnimatedStyle,
+  useDerivedValue,
   useSharedValue,
   withDelay,
   withRepeat,
@@ -25,9 +26,13 @@ interface PixelCoreProps {
   intensity?: number;
   /** Background animation style (temporary A/B/C pick on the Power screen) */
   variant?: PixelCoreVariant;
+  /** Vertical offset of the screen's 10pt sensor grid inside this stage, so cards sit on its cells */
+  gridOffsetY?: number;
+  /** Backdrop colour at a stage point (flip variant) */
+  sampleColor?: (x: number, y: number) => string;
 }
 
-export type PixelCoreVariant = 'flicker' | 'ripple' | 'embers' | 'spread' | 'lift' | 'heartbeat' | 'shockwave';
+export type PixelCoreVariant = 'flicker' | 'ripple' | 'embers' | 'spread' | 'lift' | 'heartbeat' | 'shockwave' | 'heatwave' | 'flip';
 
 export const PIXEL_CORE_VARIANTS: Array<{ value: PixelCoreVariant; label: string }> = [
   { value: 'flicker', label: '01 FLICKER' },
@@ -37,6 +42,8 @@ export const PIXEL_CORE_VARIANTS: Array<{ value: PixelCoreVariant; label: string
   { value: 'lift', label: '05 GRID' },
   { value: 'heartbeat', label: '06 HEARTBEAT' },
   { value: 'shockwave', label: '07 SHOCKWAVE' },
+  { value: 'heatwave', label: '08 HEATWAVE' },
+  { value: 'flip', label: '09 FLIP' },
 ];
 
 /**
@@ -44,17 +51,23 @@ export const PIXEL_CORE_VARIANTS: Array<{ value: PixelCoreVariant; label: string
  * noise. Two differently-seeded frames cross-fade so the core flickers like
  * a live thermal reading.
  */
-export function PixelCore({ variant = 'flicker', ...props }: PixelCoreProps) {
+export function PixelCore({ variant = 'flicker', gridOffsetY = 0, sampleColor = sampleNothing, ...props }: PixelCoreProps) {
+  if (variant === 'flip') return <FlipCore {...props} gridOffsetY={gridOffsetY} sampleColor={sampleColor} />;
   if (variant === 'ripple') return <RippleCore {...props} />;
   if (variant === 'embers') return <EmberCore {...props} />;
   if (variant === 'spread') return <SpreadCore {...props} />;
   if (variant === 'lift') return <LiftCore {...props} />;
   if (variant === 'heartbeat') return <HeartbeatCore {...props} />;
   if (variant === 'shockwave') return <ShockwaveCore {...props} />;
+  if (variant === 'heatwave') return <HeatWaveCore {...props} />;
   return <FlickerCore {...props} />;
 }
 
-type CoreProps = Omit<PixelCoreProps, 'variant'>;
+type CoreProps = Omit<PixelCoreProps, 'variant' | 'gridOffsetY' | 'sampleColor'>;
+
+function sampleNothing(): string {
+  return THERMAL_COLORS.magenta;
+}
 
 function FlickerCore({
   width,
@@ -267,6 +280,144 @@ function GridRing({
   });
 
   return <AnimatedPath fill={THERMAL_COLORS.cream} fillOpacity={GRID_DOT_OPACITY} animatedProps={animatedProps} />;
+}
+
+/**
+ * Flip: a card-flip wave over the sensor grid. Starting at the white hotspot
+ * (centerX/centerY), every grid cell turns over like a card as the crest
+ * passes — the full 10pt card folds to its edge around a vertical axis, opens
+ * on its back face, holds, then turns back. Cards never grow from their centre.
+ * Faces are sampled from the backdrop: the front is the glow just outward of
+ * the card (one step cooler), the back the glow just inward (one step hotter),
+ * so the wave matches the heat field all the way to the edges.
+ */
+function FlipCore({
+  width,
+  height,
+  centerX,
+  centerY,
+  gridOffsetY,
+  sampleColor,
+}: CoreProps & { gridOffsetY: number; sampleColor: (x: number, y: number) => string }) {
+  const progress = useSharedValue(0);
+
+  useEffect(() => {
+    progress.value = withRepeat(withTiming(1, { duration: FLIP_DURATION, easing: Easing.linear }), -1, false);
+  }, [progress]);
+
+  const { groups, travel } = useMemo(
+    () => buildFlipGroups(width, height, centerX, centerY, gridOffsetY, sampleColor),
+    [width, height, centerX, centerY, gridOffsetY, sampleColor],
+  );
+
+  return (
+    <Svg width={width} height={height} style={StyleSheet.absoluteFill} pointerEvents="none">
+      {groups.map((group) => (
+        <FlipGroup key={`${group.radius}-${group.front}-${group.back}`} group={group} travel={travel} progress={progress} />
+      ))}
+    </Svg>
+  );
+}
+
+interface FlipGroupData {
+  radius: number;
+  front: string;
+  back: string;
+  /** Top-left corners of the cards in this group (flat x,y pairs) */
+  corners: Array<number>;
+}
+
+function FlipGroup({ group, travel, progress }: { group: FlipGroupData; travel: number; progress: SharedValue<number> }) {
+  // 0 → 1 across this ring's flip: front folds (0–0.2), back opens (0.2–0.4), hold, back folds, front opens
+  const turn = useDerivedValue(() => (progress.value * travel - group.radius) / FLIP_SPAN);
+
+  const cardPath = (widthFactor: number, t: number) => {
+    'worklet';
+    // The card also shrinks a little mid-turn and settles back to full size
+    const size = CARD * (1 - FLIP_SHRINK * Math.sin(Math.PI * Math.min(1, Math.max(0, t))));
+    const w = Math.max(0, size * widthFactor);
+    if (w < 0.5) return 'M0 0';
+    const insetX = (CELL - w) / 2;
+    const insetY = CARD_GAP + (CARD - size) / 2;
+    let d = '';
+    for (let i = 0; i < group.corners.length; i += 2) {
+      d += `M${group.corners[i] + insetX} ${group.corners[i + 1] + insetY}h${w}v${size}h${-w}z`;
+    }
+    return d;
+  };
+
+  // Soft envelope: the whole turn fades in and out (0 at the ends, 1 mid-turn),
+  // and a face dims as it goes edge-on, like a card catching less light
+  const shade = (t: number, widthFactor: number) => {
+    'worklet';
+    // Ramps to full strength twice as fast as a plain sine, so cards read crisply mid-turn
+    return Math.min(1, Math.sin(Math.PI * t) * 2) * (0.72 + 0.28 * widthFactor);
+  };
+
+  const frontProps = useAnimatedProps(() => {
+    const t = turn.value;
+    if (t <= 0 || t >= 1 || (t >= 0.2 && t <= 0.8)) return { d: 'M0 0', fillOpacity: 0 };
+    const folding = t < 0.2;
+    const widthFactor = folding ? Math.cos((t / 0.2) * (Math.PI / 2)) : Math.sin(((t - 0.8) / 0.2) * (Math.PI / 2));
+    return { d: cardPath(widthFactor, t), fillOpacity: FLIP_FRONT_OPACITY * shade(t, widthFactor) };
+  });
+
+  const backProps = useAnimatedProps(() => {
+    const t = turn.value;
+    if (t <= 0.2 || t >= 0.8) return { d: 'M0 0', fillOpacity: 0 };
+    let widthFactor = 1;
+    if (t < 0.4) widthFactor = Math.sin(((t - 0.2) / 0.2) * (Math.PI / 2));
+    else if (t > 0.6) widthFactor = Math.cos(((t - 0.6) / 0.2) * (Math.PI / 2));
+    return { d: cardPath(widthFactor, t), fillOpacity: FLIP_BACK_OPACITY * shade(t, widthFactor) };
+  });
+
+  return (
+    <>
+      <AnimatedPath fill={group.front} animatedProps={frontProps} />
+      <AnimatedPath fill={group.back} animatedProps={backProps} />
+    </>
+  );
+}
+
+/**
+ * Grid cells bucketed into rings around the hotspot, then split by their
+ * sampled front/back colours. Aligned to the screen's sensor grid.
+ */
+function buildFlipGroups(
+  width: number,
+  height: number,
+  centerX: number,
+  centerY: number,
+  gridOffsetY: number,
+  sampleColor: (x: number, y: number) => string,
+) {
+  const groups = new Map<string, FlipGroupData>();
+  let maxRadius = 0;
+  const startY = ((-gridOffsetY % CELL) + CELL) % CELL - CELL;
+
+  for (let y = startY; y < height; y += CELL) {
+    for (let x = 0; x < width; x += CELL) {
+      const cx = x + CELL / 2;
+      const cy = y + CELL / 2;
+      const distance = Math.hypot(cx - centerX, cy - centerY);
+      const radius = Math.round(distance / CELL) * CELL;
+      maxRadius = Math.max(maxRadius, radius);
+
+      // Unit vector pointing away from the hotspot (any direction at the very centre)
+      const ux = distance > 0 ? (cx - centerX) / distance : 1;
+      const uy = distance > 0 ? (cy - centerY) / distance : 0;
+      const front = sampleColor(cx + ux * FLIP_SAMPLE_STEP, cy + uy * FLIP_SAMPLE_STEP);
+      const back = sampleColor(cx - ux * FLIP_SAMPLE_STEP, cy - uy * FLIP_SAMPLE_STEP);
+
+      const key = `${radius}|${front}|${back}`;
+      const group = groups.get(key) ?? { radius, front, back, corners: [] };
+      group.corners.push(x, y);
+      groups.set(key, group);
+    }
+  }
+
+  // Extra travel past the rim leaves a short rest beat before the next wave
+  return { groups: Array.from(groups.values()), travel: maxRadius + FLIP_SPAN + FLIP_REST };
 }
 
 /** Cell centers bucketed into CELL-wide rings around the center (flat x,y pairs) */
@@ -483,8 +634,8 @@ function SteppedFrame({
   return (
     <Animated.View style={[StyleSheet.absoluteFill, animatedStyle]} pointerEvents="none">
       <Svg width={width} height={height}>
-        {frame.map((layer) => (
-          <Path key={layer.color} d={layer.d} fill={layer.color} />
+        {frame.map((layer, layerIndex) => (
+          <Path key={`${layerIndex}-${layer.color}`} d={layer.d} fill={layer.color} />
         ))}
       </Svg>
     </Animated.View>
@@ -598,6 +749,127 @@ function buildEmbers(centerX: number, centerY: number, radiusX: number, radiusY:
   }));
 }
 
+/**
+ * Heatwave: the core's own cells stay exactly where they are; a heat crest
+ * rolls outward through them. As it passes, each cell borrows the colour of
+ * the band one step hotter (magenta → red → orange → gold → cream) and
+ * swells by a couple of points, then settles back. Stepped like a sprite.
+ */
+function HeatWaveCore({
+  width,
+  height,
+  centerX,
+  centerY,
+  radiusX = 125,
+  radiusY = 170,
+  intensity = 0.5,
+}: CoreProps) {
+  const progress = useSharedValue(0);
+
+  useEffect(() => {
+    progress.value = withRepeat(withTiming(1, { duration: HEATWAVE_DURATION, easing: Easing.linear }), -1, false);
+  }, [progress]);
+
+  const frames = useMemo(
+    () => buildHeatWaveFrames({ width, height, centerX, centerY, radiusX, radiusY, intensity, seed: 7, noise: 0.2 }),
+    [width, height, centerX, centerY, radiusX, radiusY, intensity],
+  );
+
+  return (
+    <>
+      {frames.map((frame, index) => (
+        <SteppedFrame key={index} index={index} count={HEATWAVE_FRAMES} progress={progress} frame={frame} width={width} height={height} />
+      ))}
+    </>
+  );
+}
+
+interface HeatCell {
+  x: number;
+  y: number;
+  /** 0 at the core, ~1.15 at the rim */
+  distance: number;
+  /** Index into HEAT_PALETTE */
+  band: number;
+}
+
+/** Same cells as buildFrame, kept individually so the wave can recolour them */
+function buildHeatCells({ width, height, centerX, centerY, radiusX, radiusY, intensity, seed, noise = 0.32 }: FrameOptions): Array<HeatCell> {
+  const random = mulberry32(seed);
+  const cells: Array<HeatCell> = [];
+  const reach = 0.75 + intensity * 0.5;
+
+  for (let y = 0; y < height; y += CELL) {
+    for (let x = 0; x < width; x += CELL) {
+      const dx = (x + CELL / 2 - centerX) / (radiusX * reach);
+      const dy = (y + CELL / 2 - centerY) / (radiusY * reach);
+      const distance = Math.sqrt(dx * dx + dy * dy);
+      if (distance > 1.15) continue;
+
+      const heat = 1 - distance + (random() - 0.5) * noise + intensity * 0.08;
+      const band = pickBand(heat);
+      if (band < 0) continue;
+      cells.push({ x, y, distance, band });
+    }
+  }
+  return cells;
+}
+
+function buildHeatWaveFrames(options: FrameOptions) {
+  const cells = buildHeatCells(options);
+
+  return Array.from({ length: HEATWAVE_FRAMES }, (_, frameIndex) => {
+    const phase = frameIndex / HEATWAVE_FRAMES;
+    const base = new Map<string, Array<string>>();
+    const lit = new Map<string, Array<string>>();
+
+    for (const cell of cells) {
+      // Distance of this cell from the nearest crest, in wavelengths (0 = on the crest)
+      let offset = cell.distance / HEATWAVE_LENGTH - phase;
+      offset -= Math.floor(offset);
+      if (offset > 0.5) offset -= 1;
+      const strength = Math.max(0, 1 - Math.abs(offset) / HEATWAVE_WIDTH);
+
+      if (strength < 0.34) {
+        push(base, HEAT_PALETTE[cell.band], `M${cell.x} ${cell.y}h${CELL}v${CELL}h-${CELL}z`);
+        continue;
+      }
+
+      // Shoulders borrow the next-hotter band and grow 2pt; the crest itself
+      // jumps two bands and swells 6pt so the wave reads at a glance
+      const onCrest = strength > 0.67;
+      const grow = onCrest ? 6 : 2;
+      const size = CELL + grow;
+      const color = HEAT_PALETTE[Math.min(HEAT_PALETTE.length - 1, cell.band + (onCrest ? 2 : 1))];
+      push(lit, color, `M${cell.x - grow / 2} ${cell.y - grow / 2}h${size}v${size}h-${size}z`);
+    }
+
+    // Base cells first, swollen crest cells on top so they overlap their neighbours
+    return [
+      ...Array.from(base.entries()).map(([color, parts]) => ({ color, d: parts.join('') })),
+      ...Array.from(lit.entries()).map(([color, parts]) => ({ color, d: parts.join('') })),
+    ];
+  });
+}
+
+function push(map: Map<string, Array<string>>, key: string, value: string) {
+  const list = map.get(key) ?? [];
+  list.push(value);
+  map.set(key, list);
+}
+
+/** Cold → hot bands of the core, same thresholds as pickColor */
+const HEAT_PALETTE = [THERMAL_COLORS.magenta, THERMAL_COLORS.red, THERMAL_COLORS.orange, THERMAL_COLORS.gold, THERMAL_COLORS.cream];
+
+function pickBand(heat: number): number {
+  if (heat > 0.86) return 4;
+  if (heat > 0.7) return 3;
+  if (heat > 0.54) return 2;
+  if (heat > 0.38) return 1;
+  if (heat > 0.26) return 0;
+  return -1;
+}
+
 interface FrameOptions {
   width: number;
   height: number;
@@ -688,6 +960,27 @@ const FIELD_COLOR_STOPS: Array<{ radius: number; color: string }> = [
   { radius: 300, color: THERMAL_COLORS.magenta },
   { radius: 360, color: THERMAL_COLORS.plum },
 ];
+
+const HEATWAVE_FRAMES = 18;
+const HEATWAVE_DURATION = 2800;
+/** Crest spacing, in units of core distance (one crest at a time) */
+const HEATWAVE_LENGTH = 1.1;
+/** Half-width of a crest, in wavelengths */
+const HEATWAVE_WIDTH = 0.16;
+
+const FLIP_DURATION = 4530;
+/** How far (pt) behind the crest a card is still turning */
+const FLIP_SPAN = 110;
+const FLIP_REST = 60;
+/** How far (pt) toward / away from the hotspot the back / front faces sample the glow */
+const FLIP_SAMPLE_STEP = 25;
+const FLIP_FRONT_OPACITY = 0.55;
+const FLIP_BACK_OPACITY = 0.85;
+/** How much a card shrinks at mid-turn (0 = no shrink) */
+const FLIP_SHRINK = 0.1;
+/** Card is one grid cell minus a 1pt seam so the grid lines stay visible */
+const CARD_GAP = 1;
+const CARD = CELL - CARD_GAP;
 
 const SHOCK_DURATION = 4200;
 const SHOCK_BAND = 45;

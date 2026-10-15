@@ -52,6 +52,77 @@ export function ThermalBackground({ preset, scrollY, scanKey }: ThermalBackgroun
   );
 }
 
+/**
+ * Screen position of the hottest point of a preset (the centre of its
+ * smallest blob — the white spot), so foreground effects can start there.
+ */
+export function getHeatHotspot(preset: ThermalPreset, width: number): { x: number; y: number } {
+  const scale = width / FIGMA_WIDTH;
+  const core = PRESETS[preset].reduce((smallest, blob) => (blob.w * blob.h < smallest.w * smallest.h ? blob : smallest));
+  return { x: (core.x + core.w / 2) * scale, y: (core.y + core.h / 2) * scale };
+}
+
+/**
+ * Colour of the (resting) backdrop at a screen point, composited the same way
+ * HeatBlob draws it and snapped to the nearest thermal swatch. Lets foreground
+ * pixels match the glow underneath them anywhere on the screen.
+ */
+export function sampleHeatColor(preset: ThermalPreset, width: number, x: number, y: number): string {
+  const scale = width / FIGMA_WIDTH;
+  const px = x / scale;
+  const py = y / scale;
+  let rgb = hexToRgb(THERMAL_COLORS.void);
+
+  for (const blob of PRESETS[preset]) {
+    const pad = blob.blur * 2;
+    const halfW = blob.w / 2 + pad;
+    const halfH = blob.h / 2 + pad;
+    const t = Math.hypot((px - (blob.x + blob.w / 2)) / halfW, (py - (blob.y + blob.h / 2)) / halfH);
+    if (t >= 1) continue;
+    const coreStop = Math.max(0.05, (blob.w / 2 - blob.blur) / (blob.w / 2 + pad));
+    const alpha =
+      t <= coreStop
+        ? blob.opacity * (1 - 0.08 * (t / coreStop))
+        : blob.opacity * 0.92 * (1 - (t - coreStop) / (1 - coreStop));
+    const color = hexToRgb(blob.color);
+    rgb = rgb.map((channel, index) => channel + (color[index] - channel) * alpha) as [number, number, number];
+  }
+
+  let best = SAMPLE_SWATCHES[0];
+  let bestDistance = Infinity;
+  for (const swatch of SAMPLE_SWATCHES) {
+    const c = hexToRgb(swatch);
+    const distance = (c[0] - rgb[0]) ** 2 + (c[1] - rgb[1]) ** 2 + (c[2] - rgb[2]) ** 2;
+    if (distance < bestDistance) {
+      bestDistance = distance;
+      best = swatch;
+    }
+  }
+  return best;
+}
+
+function hexToRgb(hex: string): [number, number, number] {
+  const value = parseInt(hex.slice(1, 7), 16);
+  return [(value >> 16) & 255, (value >> 8) & 255, value & 255];
+}
+
+const SAMPLE_SWATCHES: Array<string> = [
+  THERMAL_COLORS.navy,
+  THERMAL_COLORS.indigo,
+  '#3A0CA3',
+  THERMAL_COLORS.violet,
+  THERMAL_COLORS.plum,
+  THERMAL_COLORS.magenta,
+  THERMAL_COLORS.crimson,
+  THERMAL_COLORS.red,
+  THERMAL_COLORS.ember,
+  THERMAL_COLORS.orange,
+  THERMAL_COLORS.amber,
+  THERMAL_COLORS.gold,
+  THERMAL_COLORS.goldSoft,
+  THERMAL_COLORS.cream,
+];
+
 interface HeatBlobProps {
   blob: Blob;
   scale: number;

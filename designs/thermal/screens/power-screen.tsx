@@ -1,5 +1,5 @@
 import { Image } from 'expo-image';
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { ActivityIndicator, Pressable, StyleSheet, Text, useWindowDimensions, View } from 'react-native';
 import Animated, {
   Easing,
@@ -26,6 +26,7 @@ import { PixelButton } from '../components/pixel-button';
 import { PIXEL_CORE_VARIANTS, PixelCore, type PixelCoreVariant } from '../components/pixel-core';
 import { useRankUp } from '../components/rank-up-overlay';
 import { StakeSheet } from '../components/stake-sheet';
+import { getHeatHotspot, sampleHeatColor } from '../components/thermal-background';
 import { ThermalScreen } from '../components/thermal-screen';
 import { WalletChip } from '../components/wallet-chip';
 import { useCountUp } from '../hooks/use-count-up';
@@ -50,7 +51,7 @@ export function PowerScreen() {
   const { profile, isLoading } = useUser();
   const [isStakeOpen, setIsStakeOpen] = useState(false);
   const [isHowToOpen, setIsHowToOpen] = useState(false);
-  const [coreVariant, setCoreVariant] = useState<PixelCoreVariant>('flicker');
+  const [coreVariant, setCoreVariant] = useState<PixelCoreVariant>('flip');
 
   return (
     <ThermalScreen preset="power">
@@ -121,15 +122,28 @@ function HeatCamera({ profile, variant }: { profile: Profile; variant: PixelCore
   const animatedShu = useCountUp(heat.shu, 1500);
   const stageWidth = width - 32;
   const centerX = stageWidth / 2;
+  const stageRef = useRef<View>(null);
+  const [stageY, setStageY] = useState(0);
+  // The flip wave starts at the backdrop's white spot, which lives in screen space
+  const hotspot = getHeatHotspot('power', width);
+  const isFlip = variant === 'flip';
+  // Stage x matches the screen; stage y is offset by where the stage sits
+  const sampleColor = useCallback((x: number, y: number) => sampleHeatColor('power', width, x, y + stageY), [width, stageY]);
 
   return (
-    <View style={{ height: STAGE_HEIGHT }}>
+    <View
+      ref={stageRef}
+      style={{ height: STAGE_HEIGHT }}
+      onLayout={() => stageRef.current?.measureInWindow((_x, y) => setStageY(y))}
+    >
       <View style={[StyleSheet.absoluteFill, { left: -16, right: -16 }]}>
         <PixelCore
           width={width}
           height={STAGE_HEIGHT}
-          centerX={width / 2}
-          centerY={ART_CENTER_Y}
+          centerX={isFlip ? hotspot.x : width / 2}
+          centerY={isFlip ? hotspot.y - stageY : ART_CENTER_Y}
+          gridOffsetY={stageY}
+          sampleColor={sampleColor}
           intensity={(heat.current.level - 1) / (MAX_HEAT_LEVEL - 1)}
           variant={variant}
         />
