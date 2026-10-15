@@ -59,7 +59,7 @@ export function OnboardingScreen({ onComplete, onSkip }: OnboardingScreenProps) 
 
   return (
     <View style={styles.root}>
-      <HeatBurst width={width} height={height} centerY={0.08} burstKey={index} />
+      <HeatBurst width={width} height={height} centerY={0.08} burstKey={index} flow />
       <Sparks width={width} height={height} />
       <BottomFade width={width} height={height} />
       <SensorGrid width={width} height={height} />

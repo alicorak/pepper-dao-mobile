@@ -20,10 +20,27 @@ interface HeatBurstProps {
   centerY?: number;
   /** Replays the burst-out animation when changed */
   burstKey?: number;
+  /**
+   * Keeps the heat moving after the burst: rings pulse in a cascade so the
+   * bands travel outward from the core, and the whole burst drifts slowly
+   * along the vertical axis on an endless loop.
+   */
+  flow?: boolean;
 }
 
 /** Concentric pixel rings that burst outward, hottest in the middle */
-export function HeatBurst({ width, height, centerY = 0.45, burstKey = 0 }: HeatBurstProps) {
+export function HeatBurst({ width, height, centerY = 0.45, burstKey = 0, flow = false }: HeatBurstProps) {
+  const drift = useSharedValue(0);
+
+  useEffect(() => {
+    if (!flow) return;
+    drift.value = withRepeat(withTiming(1, { duration: FLOW_DRIFT_MS, easing: Easing.inOut(Easing.sin) }), -1, true);
+  }, [drift, flow]);
+
+  const driftStyle = useAnimatedStyle(() => ({
+    transform: [{ translateY: flow ? -FLOW_DRIFT_PT / 2 + drift.value * FLOW_DRIFT_PT : 0 }],
+  }));
+
   const rings = useMemo(() => {
     const cx = width / 2;
     const cy = height * centerY;
@@ -36,17 +53,20 @@ export function HeatBurst({ width, height, centerY = 0.45, burstKey = 0 }: HeatB
   return (
     <View style={StyleSheet.absoluteFill} pointerEvents="none">
       <View style={[StyleSheet.absoluteFill, { backgroundColor: THERMAL_COLORS.void }]} />
-      {rings.map((ring, index) => (
-        <BurstRing
-          key={ring.color}
-          index={index}
-          d={ring.d}
-          color={ring.color}
-          width={width}
-          height={height}
-          burstKey={burstKey}
-        />
-      ))}
+      <Animated.View style={[StyleSheet.absoluteFill, driftStyle]}>
+        {rings.map((ring, index) => (
+          <BurstRing
+            key={ring.color}
+            index={index}
+            d={ring.d}
+            color={ring.color}
+            width={width}
+            height={height}
+            burstKey={burstKey}
+            flow={flow}
+          />
+        ))}
+      </Animated.View>
     </View>
   );
 }
@@ -58,9 +78,10 @@ interface BurstRingProps {
   width: number;
   height: number;
   burstKey: number;
+  flow: boolean;
 }
 
-function BurstRing({ index, d, color, width, height, burstKey }: BurstRingProps) {
+function BurstRing({ index, d, color, width, height, burstKey, flow }: BurstRingProps) {
   const scale = useSharedValue(0);
   const pulse = useSharedValue(0);
 
@@ -68,14 +89,19 @@ function BurstRing({ index, d, color, width, height, burstKey }: BurstRingProps)
     const delay = (BURST_RINGS.length - index) * 55;
     scale.value = 0;
     scale.value = withDelay(delay, withTiming(1, { duration: 520, easing: Easing.out(Easing.cubic) }));
+    // In flow mode the rings are phase-shifted evenly so one wave travels outward per period
+    const period = flow ? FLOW_PULSE_MS : 1400;
+    const stagger = flow ? period / BURST_RINGS.length : 90;
+    pulse.value = 0;
     pulse.value = withDelay(
-      1300 + index * 90,
-      withRepeat(withTiming(1, { duration: 1400, easing: Easing.inOut(Easing.sin) }), -1, true),
+      1300 + index * stagger,
+      withRepeat(withTiming(1, { duration: period, easing: Easing.inOut(Easing.sin) }), -1, true),
     );
-  }, [index, scale, pulse, burstKey]);
+  }, [index, scale, pulse, burstKey, flow]);
 
+  const amplitude = flow ? 0.06 : 0.025;
   const animatedStyle = useAnimatedStyle(() => ({
-    transform: [{ translateY: height * -0.05 }, { scale: scale.value * (1 + pulse.value * 0.025) }, { translateY: height * 0.05 }],
+    transform: [{ translateY: height * -0.05 }, { scale: scale.value * (1 + pulse.value * amplitude) }, { translateY: height * 0.05 }],
   }));
 
   return (
@@ -167,6 +193,9 @@ function pixelEllipse(centerX: number, centerY: number, radiusX: number, radiusY
 }
 
 const BURST_CELL = 12;
+const FLOW_PULSE_MS = 1800;
+const FLOW_DRIFT_MS = 4200;
+const FLOW_DRIFT_PT = 28;
 
 const BURST_RINGS: Array<{ size: number; color: string }> = [
   { size: 1.5, color: THERMAL_COLORS.navy },
