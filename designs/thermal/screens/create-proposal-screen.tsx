@@ -425,7 +425,7 @@ function ReviewStage({ form, isConnected, onConnect, submitError, succeeded }: R
             <Text style={[TYPE.label10, { color: THERMAL_COLORS.red }]}>WALLET NOT CONNECTED</Text>
           </View>
           <Text style={TYPE.body14}>Please connect your wallet to submit proposals.</Text>
-          <PixelButton label="CONNECT WALLET >" variant="outlineGold" paddingVertical={10} onPress={onConnect} />
+          <PixelButton label="CONNECT WALLET >" variant="outlineGold" paddingVertical={12} onPress={onConnect} />
         </Panel>
       ) : null}
 
