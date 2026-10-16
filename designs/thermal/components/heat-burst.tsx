@@ -1,4 +1,4 @@
-import { useEffect, useMemo } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { StyleSheet, View } from 'react-native';
 import Animated, {
   Easing,
@@ -26,10 +26,30 @@ interface HeatBurstProps {
    * along the vertical axis on an endless loop.
    */
   flow?: boolean;
+  /**
+   * Shape of the hot core. `pulse` is the classic oval burst; the others
+   * grow the same heat rings around a symbol (onboarding: ✓ vote, ⚡ power).
+   */
+  shape?: HeatShape;
+  /**
+   * When `shape` changes, the heat rings flow from the old core into the new
+   * one (a short stepped morph) instead of snapping.
+   */
+  morph?: boolean;
 }
 
+export type HeatShape = 'pulse' | 'check' | 'bolt';
+
 /** Concentric pixel rings that burst outward, hottest in the middle */
-export function HeatBurst({ width, height, centerY = 0.45, burstKey = 0, flow = false }: HeatBurstProps) {
+export function HeatBurst({
+  width,
+  height,
+  centerY = 0.45,
+  burstKey = 0,
+  flow = false,
+  shape = 'pulse',
+  morph = false,
+}: HeatBurstProps) {
   const drift = useSharedValue(0);
 
   useEffect(() => {
@@ -41,14 +61,38 @@ export function HeatBurst({ width, height, centerY = 0.45, burstKey = 0, flow = 
     transform: [{ translateY: flow ? -FLOW_DRIFT_PT / 2 + drift.value * FLOW_DRIFT_PT : 0 }],
   }));
 
+  // Per-cell band value for the current shape (see buildHeatField)
+  const field = useMemo(() => buildHeatField(shape, width, height, centerY), [shape, width, height, centerY]);
+  const lastField = useRef(field);
+  const [blend, setBlend] = useState<{ from: Float32Array; t: number } | null>(null);
+
+  useEffect(() => {
+    const from = lastField.current;
+    lastField.current = field;
+    if (!morph || from === field || from.length !== field.length) return;
+
+    let step = 0;
+    setBlend({ from, t: 0 });
+    const timer = setInterval(() => {
+      step += 1;
+      if (step >= MORPH_STEPS) {
+        clearInterval(timer);
+        setBlend(null);
+        return;
+      }
+      const t = step / MORPH_STEPS;
+      setBlend({ from, t: t * t * (3 - 2 * t) });
+    }, MORPH_DURATION / MORPH_STEPS);
+    return () => clearInterval(timer);
+  }, [field, morph]);
+
   const rings = useMemo(() => {
-    const cx = width / 2;
-    const cy = height * centerY;
-    return BURST_RINGS.map((ring) => ({
+    const values = blend ? lerpField(blend.from, field, blend.t) : field;
+    return BURST_RINGS.map((ring, index) => ({
       color: ring.color,
-      d: pixelEllipse(cx, cy, (ring.size * width) / 2, (ring.size * height * 0.92) / 2),
+      d: ringPath(values, BURST_RINGS.length - 1 - index, width, height),
     }));
-  }, [width, height, centerY]);
+  }, [field, blend, width, height]);
 
   return (
     <View style={StyleSheet.absoluteFill} pointerEvents="none">
@@ -174,23 +218,124 @@ function Spark({ x, y, size, color, index }: SparkProps) {
   );
 }
 
-/** Ellipse rasterised onto a 12pt grid, as one path */
-function pixelEllipse(centerX: number, centerY: number, radiusX: number, radiusY: number): string {
-  const parts: Array<string> = [];
-  const startY = Math.floor((centerY - radiusY) / BURST_CELL) * BURST_CELL;
-  const startX = Math.floor((centerX - radiusX) / BURST_CELL) * BURST_CELL;
+/**
+ * Continuous "band" value per 12pt cell: 0 on the edge of the cream core,
+ * +1 per ring outward (7 = navy edge), negative inside the core. Pulse and
+ * shaped cores share this scale, so two fields can be blended into a morph.
+ */
+function buildHeatField(shape: HeatShape, width: number, height: number, centerY: number): Float32Array {
+  const columns = Math.ceil(width / BURST_CELL);
+  const rows = Math.ceil(height / BURST_CELL);
+  const values = new Float32Array(columns * rows);
+  const cx = width / 2;
+  const cy = height * centerY;
+  const scale = width / FIGMA_WIDTH;
+  const sdf = shape === 'pulse' ? null : SHAPE_SDFS[shape];
 
-  for (let y = startY; y < centerY + radiusY; y += BURST_CELL) {
-    for (let x = startX; x < centerX + radiusX; x += BURST_CELL) {
-      const dx = (x + BURST_CELL / 2 - centerX) / radiusX;
-      const dy = (y + BURST_CELL / 2 - centerY) / radiusY;
-      if (dx * dx + dy * dy <= 1) {
-        parts.push(`M${x} ${y}h${BURST_CELL}v${BURST_CELL}h-${BURST_CELL}z`);
+  for (let row = 0; row < rows; row++) {
+    for (let column = 0; column < columns; column++) {
+      const x = column * BURST_CELL + BURST_CELL / 2 - cx;
+      const y = row * BURST_CELL + BURST_CELL / 2 - cy;
+      let band: number;
+      if (sdf) {
+        const distance = sdf(x / scale, y / scale / SHAPE_STRETCH) * SHAPE_STRETCH;
+        band = toBand(distance, SHAPE_BAND_STOPS);
+      } else {
+        const radius = Math.hypot(x / (width / 2), y / ((height * 0.92) / 2));
+        band = toBand(radius, PULSE_BAND_STOPS);
+      }
+      values[row * columns + column] = band;
+    }
+  }
+  return values;
+}
+
+/** Piecewise-linear map from a distance onto ring index, extrapolating at both ends */
+function toBand(value: number, stops: Array<number>): number {
+  if (value <= stops[0]) return (value - stops[0]) / (stops[1] - stops[0]);
+  for (let i = 1; i < stops.length; i++) {
+    if (value <= stops[i]) return i - 1 + (value - stops[i - 1]) / (stops[i] - stops[i - 1]);
+  }
+  const last = stops.length - 1;
+  return last + (value - stops[last]) / (stops[last] - stops[last - 1]);
+}
+
+function lerpField(from: Float32Array, to: Float32Array, t: number): Float32Array {
+  const out = new Float32Array(to.length);
+  for (let i = 0; i < to.length; i++) out[i] = from[i] + (to[i] - from[i]) * t;
+  return out;
+}
+
+/** Cells whose band is within `band` (0 = cream … 7 = navy), merged into row runs */
+function ringPath(values: Float32Array, band: number, width: number, height: number): string {
+  const columns = Math.ceil(width / BURST_CELL);
+  const rows = Math.ceil(height / BURST_CELL);
+  const parts: Array<string> = [];
+  for (let row = 0; row < rows; row++) {
+    let runStart = -1;
+    for (let column = 0; column <= columns; column++) {
+      const inside = column < columns && values[row * columns + column] <= band;
+      if (inside && runStart < 0) runStart = column;
+      if (!inside && runStart >= 0) {
+        const x = runStart * BURST_CELL;
+        const w = (column - runStart) * BURST_CELL;
+        parts.push(`M${x} ${row * BURST_CELL}h${w}v${BURST_CELL}h${-w}z`);
+        runStart = -1;
       }
     }
   }
   return parts.join('');
 }
+
+function segmentDistance(px: number, py: number, ax: number, ay: number, bx: number, by: number): number {
+  const vx = bx - ax;
+  const vy = by - ay;
+  const t = Math.max(0, Math.min(1, ((px - ax) * vx + (py - ay) * vy) / (vx * vx + vy * vy)));
+  return Math.hypot(px - ax - t * vx, py - ay - t * vy);
+}
+
+/** Signed distance to a thick polyline; points are Figma pt around the core */
+function strokeSdf(points: Array<[number, number]>, halfWidth: number) {
+  const p = points.map(([x, y]) => [x, y / SHAPE_STRETCH]);
+  return (x: number, y: number) => {
+    let d = Infinity;
+    for (let i = 1; i < p.length; i++) d = Math.min(d, segmentDistance(x, y, p[i - 1][0], p[i - 1][1], p[i][0], p[i][1]));
+    return d - halfWidth / SHAPE_STRETCH;
+  };
+}
+
+/** Signed distance to a closed polygon (negative inside) */
+function polygonSdf(points: Array<[number, number]>) {
+  const p = points.map(([x, y]) => [x, y / SHAPE_STRETCH]);
+  return (x: number, y: number) => {
+    let d = Infinity;
+    let inside = false;
+    for (let i = 0, j = p.length - 1; i < p.length; j = i++) {
+      d = Math.min(d, segmentDistance(x, y, p[j][0], p[j][1], p[i][0], p[i][1]));
+      if (p[i][1] > y !== p[j][1] > y && x < ((p[j][0] - p[i][0]) * (y - p[i][1])) / (p[j][1] - p[i][1]) + p[i][0]) {
+        inside = !inside;
+      }
+    }
+    return inside ? -d : d;
+  };
+}
+
+const FIGMA_WIDTH = 402;
+/** Rings are this much thicker vertically than horizontally */
+const SHAPE_STRETCH = 1.6;
+/** Ring edges around a shaped core (Figma pt), cream → navy */
+const SHAPE_BAND_STOPS = [0, 26, 52, 80, 108, 140, 176, 214];
+/** Ring edges of the oval pulse (normalised radius), cream → navy (BURST_RINGS sizes) */
+const PULSE_BAND_STOPS = [0.43, 0.56, 0.7, 0.84, 0.98, 1.14, 1.32, 1.5];
+const MORPH_DURATION = 520;
+const MORPH_STEPS = 10;
+
+/** Same geometry as the Figma "Onboarding C v2" drafts */
+const SHAPE_SDFS: Record<Exclude<HeatShape, 'pulse'>, (x: number, y: number) => number> = {
+  check: strokeSdf([[-82, 2], [-24, 62], [86, -78]], 30),
+  bolt: polygonSdf([[8, -118], [48, -118], [18, -28], [66, -28], [-14, 120], [4, 18], [-46, 18]]),
+};
+
 
 const BURST_CELL = 12;
 const FLOW_PULSE_MS = 1800;
