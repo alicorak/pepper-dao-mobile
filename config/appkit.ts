@@ -168,6 +168,13 @@ export const appKit = createAppKit({
  */
 export { activeNetwork, availableNetworks, chilizMainnet, chilizSpicyTestnet };
 
+/** Featured wallets, in display order (thermal wallet picker) */
+export const FEATURED_WALLETS = [
+  { key: 'socios', id: SOCIOS_WALLET_ID, name: 'SOCIOS.COM', meta: 'RECOMMENDED · CHILIZ NATIVE' },
+  { key: 'metamask', id: METAMASK_WALLET_ID, name: 'METAMASK', meta: 'BROWSER & MOBILE' },
+  { key: 'okx', id: OKX_WALLET_ID, name: 'OKX WALLET', meta: 'MULTI-CHAIN' },
+] as const;
+
 /**
  * Export AppKit component for mounting in root
  */
