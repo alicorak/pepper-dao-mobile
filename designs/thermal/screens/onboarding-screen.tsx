@@ -8,7 +8,7 @@ import Svg, { Defs, LinearGradient, Rect, Stop } from 'react-native-svg';
 import { telemetry } from '@/lib/telemetry';
 
 import { Touchable } from '../components/atoms';
-import { HeatBurst, Sparks } from '../components/heat-burst';
+import { HeatBurst, type HeatShape, Sparks } from '../components/heat-burst';
 import { Panel } from '../components/panel';
 import { PixelBar } from '../components/pixel-bar';
 import { PixelButton } from '../components/pixel-button';
@@ -59,7 +59,7 @@ export function OnboardingScreen({ onComplete, onSkip }: OnboardingScreenProps) 
 
   return (
     <View style={styles.root}>
-      <HeatBurst width={width} height={height} centerY={0.08} burstKey={index} flow />
+      <HeatBurst width={width} height={height} centerY={step.shape === 'pulse' ? 0.08 : SHAPE_CENTER_Y} shape={step.shape} morph flow />
       <Sparks width={width} height={height} />
       <BottomFade width={width} height={height} />
       <SensorGrid width={width} height={height} />
@@ -128,6 +128,8 @@ function progressColors(index: number): Array<string> {
 
 interface Step {
   number: string;
+  /** Heat character for this step: pulse → vote ✓ → power ⚡ */
+  shape: HeatShape;
   title: string;
   eyebrow: string;
   body: string;
@@ -136,18 +138,21 @@ interface Step {
 const STEPS: Array<Step> = [
   {
     number: '01',
+    shape: 'pulse',
     title: 'FEEL THE\nPULSE',
     eyebrow: 'TREASURY · SUPPLY · LIVE VOTES',
     body: "Track PEPPER metrics, treasury health, and community stats. Stay updated on the DAO's heartbeat!",
   },
   {
     number: '02',
+    shape: 'check',
     title: 'DECIDE\nTOGETHER',
     eyebrow: 'PROPOSALS · STAGES · VOTES',
     body: "Vote on governance proposals and shape the DAO's future. Your voice matters in every decision.",
   },
   {
     number: '03',
+    shape: 'bolt',
     title: 'CLAIM YOUR\nPOWER',
     eyebrow: 'STAKE · REP · 6 HEAT RANKS',
     body: 'Stake tokens, earn reputation, and climb 6 ranks. Build streaks to unlock rewards and influence!',
@@ -155,6 +160,8 @@ const STEPS: Array<Step> = [
 ];
 
 const CELLS_PER_STEP = 4;
+/** Vertical centre of a shaped heat character (Figma: 205 / 874) */
+const SHAPE_CENTER_Y = 0.235;
 
 const styles = StyleSheet.create({
   root: {
