@@ -156,6 +156,11 @@ export const appKit = createAppKit({
     swaps: false,
     onramp: false,
   },
+  // Match the thermal UI: dark modal with the thermal gold accent
+  themeMode: 'dark',
+  themeVariables: {
+    accent: '#FFD60A',
+  },
 });
 
 /**
